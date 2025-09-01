@@ -1,0 +1,17 @@
+{
+"type": "FeatureCollection",
+"name": "Test 2 Lantai 1 Buni - POI",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "id": null, "name": "Pintu Masuk", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818894439624088, -6.14491950174679 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Pintu Ruang meeting", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818902725848019, -6.144864887025475 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Pintu Ruang Pantry", "floor": null, "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818891708167541, -6.144778186904015 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Pintu Ruang Hardware", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818922753463582, -6.144711740305239 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Pintu Toilet", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.8189415621581899, -6.144689516763276 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Dapur", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818894342949548, -6.144671469105496 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Sofa Lobby", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818939372534814, -6.144875925951044 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Lemari Display", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818967399514293, -6.144913378806391 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Smart Locker", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818942200945571, -6.144939327370155 ] } },
+{ "type": "Feature", "properties": { "id": null, "name": "Hardware", "floor": "1", "icon": null, "room_id": null }, "geometry": { "type": "Point", "coordinates": [ 106.818919766505488, -6.144772195588764 ] } }
+]
+}

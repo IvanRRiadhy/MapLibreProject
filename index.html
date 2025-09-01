@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Indoor Map — POI to POI Shortest Path</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- MapLibre + Maptiler style (2D only) -->
+  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { position: absolute; top: 80px; bottom: 0; left: 0; right: 0; }
+    .hidden { display: none !important; }
+
+    .topbar {
+      position: absolute; top: 0; left: 0; right: 0; height: 80px;
+      display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+      padding: 10px 12px; background: #111a; backdrop-filter: blur(6px); color: #fff; z-index: 2;
+    }
+    .controls { display: flex; gap: 8px; align-items: center; }
+    select, button {
+      height: 36px; border-radius: 8px; border: 1px solid #444; background: #222; color: #fff; padding: 0 10px;
+    }
+    button { cursor: pointer; }
+    .legend {
+      display: flex; gap: 12px; align-items: center; padding: 8px 12px; border-radius: 10px; background: #111a; border: 1px solid #333;
+    }
+    .key { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+    .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1px solid #0008; }
+    .swatch.line { width: 18px; height: 3px; border-radius: 1px; }
+    .note { margin-left: 8px; font-size: 12px; opacity: .8; }
+    #doneModal {
+  position: fixed; inset: 0; z-index: 9999;
+  display: grid; place-items: center;
+  background: rgba(0,0,0,.6);
+}
+#doneModal .card {
+  background: #121212; color: #fff;
+  padding: 24px; border-radius: 14px;
+  width: min(92vw, 520px);
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  text-align: center;
+}
+#doneModal h2 { margin: 0 0 8px; font-size: 22px; }
+#doneModal p  { margin: 0 0 18px; opacity: .9; }
+#doneOk {
+  padding: 10px 18px; border-radius: 10px;
+  border: 1px solid #2f6fed; background: #3d7bfd; color:#fff;
+  cursor: pointer; font-weight: 600;
+}
+#doneOk:focus { outline: 2px solid #9bb4ff; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="controls">
+      <label for="startPoi">Start</label>
+      <select id="startPoi"></select>
+
+      <label for="endPoi">End</label>
+      <select id="endPoi"></select>
+
+      <button id="goBtn">Navigate</button>
+      <button id="clearBtn">Clear</button>
+      <span class="note" id="statusNote"></span>
+    </div>
+    <div class="legend">
+      <span class="key"><span class="swatch" style="background:#b0b0b0;"></span>Walls</span>
+      <span class="key"><span class="swatch" style="background:#5c9ded;"></span>Doors</span>
+      <span class="key"><span class="swatch" style="background:#ffd166;"></span>Portals</span>
+      <span class="key"><span class="swatch" style="background:#29a329;"></span>Walkable</span>
+      <span class="key"><span class="swatch" style="background:#ff6b6b;"></span>POIs</span>
+      <span class="key"><span class="swatch line" style="background:#8a2be2;"></span>Nav Lines</span>
+      <span class="key"><span class="swatch line" style="background:#00d1b2;"></span>Shortest Path</span>
+    </div>
+  </div>
+
+  <div id="map"></div>
+  <div id="doneModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="doneTitle">
+  <div class="card">
+    <h2 id="doneTitle">Navigation is done</h2>
+    <p>You’ve reached the destination. The route has been cleared.</p>
+    <button id="doneOk" type="button">OK</button>
+  </div>
+</div>
+
+  <script>
+    // 👉 Put your MapTiler key here:
+    const MAPTILER_KEY = "ffyommcZH3MxvLP2KHvR";
+  </script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <script src="app.js"></script>
+</body>
+</html>

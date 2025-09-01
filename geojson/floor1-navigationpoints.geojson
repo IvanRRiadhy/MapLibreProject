@@ -1,0 +1,13 @@
+{
+"type": "FeatureCollection",
+"name": "Navigation Point",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "id": "11", "floor": "1" }, "geometry": { "type": "Point", "coordinates": [ 106.818894246526398, -6.144893693688212 ] } },
+{ "type": "Feature", "properties": { "id": "12", "floor": "1" }, "geometry": { "type": "Point", "coordinates": [ 106.818926644686201, -6.144895994546219 ] } },
+{ "type": "Feature", "properties": { "id": "13", "floor": "1" }, "geometry": { "type": "Point", "coordinates": [ 106.818892575192763, -6.144831570518265 ] } },
+{ "type": "Feature", "properties": { "id": "14", "floor": "1" }, "geometry": { "type": "Point", "coordinates": [ 106.818890389602601, -6.144741581386795 ] } },
+{ "type": "Feature", "properties": { "id": "15", "floor": "1" }, "geometry": { "type": "Point", "coordinates": [ 106.818890132474351, -6.14469927115069 ] } },
+{ "type": "Feature", "properties": { "id": "16", "floor": "1" }, "geometry": { "type": "Point", "coordinates": [ 106.818919445095119, -6.144691601621128 ] } }
+]
+}
