@@ -3,67 +3,131 @@
 <head>
   <meta charset="utf-8" />
   <title>Indoor Map — POI to POI Shortest Path</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- MapLibre + Maptiler style (2D only) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- Avoid favicon 404 -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%233d7bfd'/%3E%3C/svg%3E" />
+  <!-- MapLibre -->
   <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
   <style>
-    html, body { height: 100%; margin: 0; }
-    #map { position: absolute; top: 80px; bottom: 0; left: 0; right: 0; }
-    .hidden { display: none !important; }
+    :root{
+      --bg:#0f1115; --panel:#111a; --text:#fff; --muted:#c7cbd4;
+      --border:#333; --accent:#3d7bfd;
+      --radius:10px; --tap:30px;
+    }
+    *{box-sizing:border-box}
+    html, body { height:100%; margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
+    .hidden{display:none!important}
 
-    .topbar {
-      position: absolute; top: 0; left: 0; right: 0; height: 80px;
-      display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
-      padding: 10px 12px; background: #111a; backdrop-filter: blur(6px); color: #fff; z-index: 2;
+    /* ===== Desktop default (original look) ===== */
+    body.desktop {
+      position:relative;
     }
-    .controls { display: flex; gap: 8px; align-items: center; }
-    select, button {
-      height: 36px; border-radius: 8px; border: 1px solid #444; background: #222; color: #fff; padding: 0 10px;
+    body.desktop .topbar{
+      position:absolute; top:0; left:0; right:0; height:80px;
+      display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:center;
+      padding:10px 12px; background: var(--panel); backdrop-filter: blur(6px);
+      color:#fff; z-index:2; border-bottom:1px solid var(--border);
     }
-    button { cursor: pointer; }
-    .legend {
-      display: flex; gap: 12px; align-items: center; padding: 8px 12px; border-radius: 10px; background: #111a; border: 1px solid #333;
+    body.desktop .controls{ display:flex; gap:8px; align-items:center; flex-wrap:nowrap; }
+    body.desktop select, body.desktop button{
+      height:36px; border-radius:8px; border:1px solid #444; background:#222; color:#fff; padding:0 10px;
     }
-    .key { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-    .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1px solid #0008; }
-    .swatch.line { width: 18px; height: 3px; border-radius: 1px; }
-    .note { margin-left: 8px; font-size: 12px; opacity: .8; }
-    #doneModal {
-  position: fixed; inset: 0; z-index: 9999;
-  display: grid; place-items: center;
-  background: rgba(0,0,0,.6);
-}
-#doneModal .card {
-  background: #121212; color: #fff;
-  padding: 24px; border-radius: 14px;
-  width: min(92vw, 520px);
-  box-shadow: 0 20px 60px rgba(0,0,0,.5);
-  text-align: center;
-}
-#doneModal h2 { margin: 0 0 8px; font-size: 22px; }
-#doneModal p  { margin: 0 0 18px; opacity: .9; }
-#doneOk {
-  padding: 10px 18px; border-radius: 10px;
-  border: 1px solid #2f6fed; background: #3d7bfd; color:#fff;
-  cursor: pointer; font-weight: 600;
-}
-#doneOk:focus { outline: 2px solid #9bb4ff; outline-offset: 2px; }
+    body.desktop button{ cursor:pointer; }
+    body.desktop .legend{
+      display:flex; gap:12px; align-items:center; padding:8px 12px; border-radius:10px; background:#111a; border:1px solid #333;
+    }
+    body.desktop .key{ display:inline-flex; align-items:center; gap:6px; font-size:13px; }
+    body.desktop .swatch{ width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid #0008; }
+    body.desktop .swatch.line{ width:18px; height:3px; border-radius:1px; }
+    body.desktop .note{ margin-left:8px; font-size:12px; opacity:.8; }
+    body.desktop #map{ position:absolute; top:80px; bottom:0; left:0; right:0; }
+
+    /* ===== Mobile / small screens ===== */
+    @media (max-width: 899px){
+      html,body{ height:100%; }
+      body{ display:grid; grid-template-rows:auto 1fr; }
+      #map{ width:100%; height:100%; }
+
+      .topbar{
+        position:sticky; top:0; z-index:5;
+        background:#151925cc; backdrop-filter:blur(8px);
+        border-bottom:1px solid var(--border);
+        padding:4px 8px;
+      }
+      /* compact two-row controls */
+      .controls{
+        display:grid; gap:4px 6px; align-items:center;
+        grid-template-columns: 1fr 1fr;
+      }
+      .field{ display:grid; gap:4px; }
+      label{ font-size:12px; color:#9aa4b2; }
+      select, button, input[type="checkbox"]{ height: 24px;font-size:12px;padding: 0 8px; } /* prevent iOS zoom */
+      select{
+        height:var(--tap); border-radius:var(--radius); border:1px solid var(--border);
+        background:#1a2030; color:#fff; padding:0 10px; width:100%;
+      }
+      button{
+        height:var(--tap); border-radius:var(--radius);
+        border:1px solid var(--accent); background:var(--accent);
+        color:#fff; padding:0 14px; font-weight:600; cursor:pointer;
+      }
+      button.secondary{ border-color:var(--border); background:#222a3a; }
+      .actions{ display:flex; gap:8px; justify-content:flex-end; }
+      .gps{ display:flex; align-items:center; gap:10px; }
+      .gps-toggle{
+        display:inline-flex; align-items:center; gap:8px;
+        padding: 4px 8px; border:1px solid var(--border); border-radius:999px; background:#131a29; line-height:1;
+      }
+      #gpsStatus{ color:#9aa4b2; font-size:12px; }
+      .statusline{ min-height:16px; }
+      .note{ font-size:12px; color:#9aa4b2; }
+
+      /* hide legend on mobile */
+      .legend{ display:none !important; }
+    }
+
+    /* Done modal (shared) */
+    #doneModal{
+      position:fixed; inset:0; z-index:50; display:grid; place-items:center;
+      background:rgba(0,0,0,.6); padding:20px;
+    }
+    #doneModal .card{
+      background:#121212; color:#fff; padding:24px; border-radius:14px;
+      width:min(92vw,520px); box-shadow:0 20px 60px rgba(0,0,0,.5); text-align:center;
+    }
+    #doneModal h2{ margin:0 0 8px; font-size:22px; }
+    #doneModal p{ margin:0 0 18px; opacity:.9; }
+    #doneOk{
+      height:40px; padding:0 18px; border-radius:10px;
+      border:1px solid #2f6fed; background:#3d7bfd; color:#fff; font-weight:600; cursor:pointer;
+    }
+    #doneOk:focus{ outline:2px solid #9bb4ff; outline-offset:2px; }
   </style>
 </head>
-<body>
+<body class="desktop">
   <div class="topbar">
+    <!-- Controls (kept same IDs) -->
     <div class="controls">
       <label for="startPoi">Start</label>
-      <select id="startPoi"></select>
+      <select id="startPoi" aria-label="Start point"></select>
 
       <label for="endPoi">End</label>
-      <select id="endPoi"></select>
+      <select id="endPoi" aria-label="End point"></select>
 
-      <button id="goBtn">Navigate</button>
-      <button id="clearBtn">Clear</button>
-      <span class="note" id="statusNote"></span>
+      <button id="goBtn" type="button" aria-label="Navigate">Navigate</button>
+      <button id="clearBtn" type="button" class="secondary" aria-label="Clear route">Clear</button>
+
+      <span class="note" id="statusNote" aria-live="polite"></span>
+
+      <label class="gps-toggle" style="display:inline-flex;gap:.5rem;align-items:center">
+        <input type="checkbox" id="gpsFollowToggle" />
+        Use GPS
+      </label>
+      <span id="gpsStatus" style="margin-left:.5rem;color:#999" aria-live="polite"></span>
     </div>
+
+    <!-- Legend (shown on desktop, hidden by media query on mobile) -->
     <div class="legend">
       <span class="key"><span class="swatch" style="background:#b0b0b0;"></span>Walls</span>
       <span class="key"><span class="swatch" style="background:#5c9ded;"></span>Doors</span>
@@ -75,21 +139,33 @@
     </div>
   </div>
 
-  <div id="map"></div>
+  <div id="map" role="application" aria-label="Indoor navigation map"></div>
+
+  <!-- Done modal -->
   <div id="doneModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="doneTitle">
-  <div class="card">
-    <h2 id="doneTitle">Navigation is done</h2>
-    <p>You’ve reached the destination. The route has been cleared.</p>
-    <button id="doneOk" type="button">OK</button>
+    <div class="card">
+      <h2 id="doneTitle">Navigation is done</h2>
+      <p>You’ve reached the destination. The route has been cleared.</p>
+      <button id="doneOk" type="button">OK</button>
+    </div>
   </div>
-</div>
 
   <script>
     // 👉 Put your MapTiler key here:
     const MAPTILER_KEY = "ffyommcZH3MxvLP2KHvR";
+
+    // Switch body class based on viewport width so desktop keeps original layout
+    function setMode(){
+      if (window.matchMedia('(max-width: 899px)').matches) {
+        document.body.classList.remove('desktop');
+      } else {
+        document.body.classList.add('desktop');
+      }
+    }
+    setMode();
+    window.addEventListener('resize', setMode);
   </script>
   <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
-
   <script src="app.js"></script>
 </body>
 </html>

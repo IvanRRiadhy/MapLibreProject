@@ -65,6 +65,13 @@ let followCamera = true;     // toggle if you ever want to disable
 const MAX_STEP_PX = 5;          // cap per-frame step in screen pixels
 const SPEED_PX_PER_SEC = 160;   // hold speed; tweak to taste
 
+// ==== GPS follow state ====
+let gpsFollow = false;
+let gpsWatchId = null;
+let lastGpsNavDist = null;   // meters along current route (for direction)
+const OFFROUTE_MAX_M = 4;   // snap tolerance; tweak for your building
+const MIN_ACCEPTABLE_ACCURACY_M = 10;   // ignore noisy fixes
+const MAX_ALONG_DELTA_M = 4;            // cap sudden jumps
 // Small helpers
 const rad = (d) => d * Math.PI / 180;
 function lonLatToMeters([lon, lat]) {
@@ -80,6 +87,14 @@ function distMeters(a, b) {
   return Math.sqrt(dx*dx + dy*dy);
 }
 function fmt(m) { return `${m.toFixed(1)} m`; }
+
+let snapHistory = [];
+function smoothAlong(along) {
+  snapHistory.push(along);
+  if (snapHistory.length > 5) snapHistory.shift();
+  return snapHistory.reduce((a,b) => a+b, 0) / snapHistory.length;
+}
+
 
 // Graph over existing navigation lines only
 class Graph {
@@ -484,6 +499,15 @@ if (path.coords.length) {
   navIndex = 0;                 // (kept but unused for smooth mode)
   navDirection = 1;
   navEndCoord = path.coords[path.coords.length - 1];
+if (navPath.length) {
+  const start = navPath[0];
+  const end = navPath[navPath.length - 1];
+  console.log("[Route start]", "lon:", start[0].toFixed(6), "lat:", start[1].toFixed(6));
+  console.log("[Route end]",   "lon:", end[0].toFixed(6),   "lat:", end[1].toFixed(6));
+
+  // if you want length in meters too
+  console.log("[Route length]", navTotalDist.toFixed(2), "m");
+}
 
   // NEW: precompute cumulative distances
   const out = buildCumDistances(navPath);
@@ -515,7 +539,14 @@ clearBtn.addEventListener("click", () => {
   const src = map.getSource('nav-markers');
   if (src) src.setData({ type: 'FeatureCollection', features: [] });
   status("");
+
+  const gpsToggle = document.getElementById('gpsFollowToggle');
+  if (gpsToggle) gpsToggle.checked = false;
+
+  stopGpsFollow();
+  clearGpsPoint();
 });
+
 
   function status(msg) { statusNote.textContent = msg || ""; }
 function updateNavMarkers(startLonLat, endLonLat, pathCoords) {
@@ -719,6 +750,22 @@ map.addLayer({
   });
       map.getCanvas().setAttribute('tabindex', '0');
   map.getCanvas().focus();
+
+    map.addSource('gps', {
+  type: 'geojson',
+  data: { type: 'FeatureCollection', features: [] }
+});
+map.addLayer({
+  id: 'gps-dot',
+  type: 'circle',
+  source: 'gps',
+  paint: {
+    'circle-radius': 5,
+    'circle-color': '#00acf0',
+    'circle-stroke-width': 2,
+    'circle-stroke-color': '#003e66'
+  }
+});
   });
 
   function emptyLine() {
@@ -755,6 +802,7 @@ function resetNavigation() {
   if (startSel) startSel.value = "";
   if (endSel) endSel.value = "";
   if (statusNote) statusNote.textContent = "";
+  stopGpsFollow();
 }
 
 function showDoneModal() {
@@ -861,6 +909,186 @@ document.addEventListener('keyup', (e) => {
   moveDir = keyFwd ? 1 : (keyBack ? -1 : 0);
   if (moveDir === 0) isMoving = false;
 });
+
+function setGpsPoint(lonlat) {
+  const src = map.getSource('gps');
+  if (!src) return;
+  src.setData({
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Point', coordinates: lonlat }
+    }]
+  });
+}
+function clearGpsPoint() {
+  map.getSource('gps')?.setData({ type:'FeatureCollection', features:[] });
+}
+function setGpsStatus(msg, color='#999') {
+  const el = document.getElementById('gpsStatus');
+  if (el) { el.textContent = msg || ''; el.style.color = color; }
+}
+function startGpsFollow() {
+  if (!('geolocation' in navigator)) {
+    setGpsStatus('GPS not available in this browser', '#d33');
+    return; // don't flip the checkbox here
+  }
+
+  // iOS/Safari needs secure context (https or localhost)
+  if (!isSecureContext) {
+    setGpsStatus('Needs HTTPS or localhost for GPS', '#d33');
+    return;
+  }
+
+  if (!navPath.length) {
+    setGpsStatus('Set a route first', '#d33');
+    return;
+  }
+
+  const routeLine = {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: navPath },
+    properties: {}
+  };
+
+  // optional: preflight permissions (not supported everywhere)
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'geolocation' }).then((res) => {
+        if (res.state === 'denied') {
+          setGpsStatus('Location permission denied', '#d33');
+        }
+      }).catch(() => {});
+    }
+  } catch {}
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    handleGpsSuccess(routeLine),
+    handleGpsError,
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+  );
+
+  gpsFollow = true;
+  isMoving = false; // GPS drives the marker
+  keyFwd = keyBack = false;
+}
+
+function handleGpsSuccess(routeLine) {
+  return (pos) => {
+    const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+
+    // Show the raw GPS dot for reference
+    setGpsPoint([lon, lat]);
+
+    // Ignore super noisy fixes (common on desktop or indoors)
+    if (typeof accuracy === 'number' && accuracy > MIN_ACCEPTABLE_ACCURACY_M) {
+      setGpsStatus(`Low accuracy (${Math.round(accuracy)} m) — waiting for better fix`, '#f39c12');
+      return;
+    } else {
+      setGpsStatus('');
+    }
+
+    // Snap to the route
+    const user = turf.point([lon, lat]);
+    const snapped = turf.nearestPointOnLine(routeLine, user, { units: 'meters' });
+    const offDist = snapped?.properties?.dist ?? Infinity;
+    let along     = snapped?.properties?.location ?? null;
+    along = smoothAlong(along);
+    console.log(
+  "[Snapped]",
+  "lon:", snapped.geometry.coordinates[0].toFixed(6),
+  "lat:", snapped.geometry.coordinates[1].toFixed(6),
+  "offDist:", offDist.toFixed(2), "m",
+  "along:", along.toFixed(2), "m"
+);
+
+
+    if (!isFinite(offDist) || along == null) {
+      setGpsStatus('GPS snap failed', '#d33');
+      return;
+    }
+
+    // Soften crazy jumps along the line
+    if (lastGpsNavDist != null) {
+      const delta = along - lastGpsNavDist;
+      if (Math.abs(delta) > MAX_ALONG_DELTA_M) {
+        along = lastGpsNavDist + Math.sign(delta) * MAX_ALONG_DELTA_M;
+      }
+    }
+
+    // Off-route hint (don’t force stop)
+    if (offDist > OFFROUTE_MAX_M) {
+      setGpsStatus(`Off route ~${offDist.toFixed(0)} m`, '#f39c12');
+    } else {
+      setGpsStatus('');
+    }
+
+    // Advance the nav marker
+    navDistPos = Math.max(0, Math.min(navTotalDist, along));
+    if (lastGpsNavDist != null) {
+      const delta = navDistPos - lastGpsNavDist;
+      moveDir = delta > 0 ? 1 : (delta < 0 ? -1 : 0);
+    }
+    lastGpsNavDist = navDistPos;
+
+    const posOnRoute = coordAtDistance(navPath, navCumDist, navDistPos).coord || navPath[0];
+    const ahead = coordAtDistance(navPath, navCumDist, Math.min(navTotalDist, navDistPos + 1.5)).coord || posOnRoute;
+    const bearing = turf.bearing(turf.point(posOnRoute), turf.point(ahead));
+
+    const features = [{
+      type: 'Feature',
+      properties: { role: 'start', bearing },
+      geometry: { type: 'Point', coordinates: posOnRoute }
+    }];
+    if (navEndCoord) {
+      features.push({ type: 'Feature', properties: { role: 'end' }, geometry: { type: 'Point', coordinates: navEndCoord } });
+    }
+    map.getSource('nav-markers')?.setData({ type:'FeatureCollection', features });
+
+    updateNavCamera(posOnRoute, ahead, bearing);
+
+    if (Math.abs(navTotalDist - navDistPos) < 1.0) {
+      stopGpsFollow();
+      showDoneModal();
+    }
+    console.log(
+  "[GPS raw]",
+  "lon:", lon.toFixed(6),
+  "lat:", lat.toFixed(6),
+  "accuracy:", Math.round(accuracy), "m"
+);
+
+  };
+  
+}
+
+function handleGpsError(err) {
+  // DO NOT uncheck the toggle automatically anymore
+  // Just show status; user can uncheck if they want.
+  const msg = err?.message || 'GPS error';
+  setGpsStatus(msg, '#d33');
+  stopGpsFollow(); // stop the watcher, but keep the checkbox state
+}
+
+function stopGpsFollow() {
+  if (gpsWatchId != null) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+  gpsFollow = false;
+  lastGpsNavDist = null;
+  // setGpsStatus('');
+  // keep the gps dot for a moment or clear it immediately:
+  // clearGpsPoint();
+}
+
+document.getElementById('gpsFollowToggle')?.addEventListener('change', (e) => {
+  if (e.target.checked) startGpsFollow();
+  else stopGpsFollow();
+});
+
+
 
 
 })();
