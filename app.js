@@ -247,6 +247,60 @@ async function addSvgIconFromUrl(map, id, url, size = 32) {
   });
 }
 
+function getNearestStair(poi, floor, poiItems) {
+  const stairs = poiItems.filter(p => 
+    p.type === "Stairs" && String(p.id).startsWith(floor)
+  );
+  if (!stairs.length) return null;
+
+  return stairs.reduce((best, stair) => {
+    const d = distMeters(poi.coord, stair.coord);
+    return !best || d < best.dist ? { stair, dist: d } : best;
+  }, null).stair;
+}
+
+async function buildMultiFloorRoute(startPoi, endPoi, poiItems, graph) {
+  const segments = [];
+  const startFloor = String(startPoi.id).charAt(0);
+  const endFloor   = String(endPoi.id).charAt(0);
+
+  let currentFloor = startFloor;
+  let currentPoi = startPoi;
+
+  while (currentFloor !== endFloor) {
+    // 1. Find nearest stair on current floor
+    const stairStart = getNearestStair(currentPoi, currentFloor, poiItems);
+    if (!stairStart) throw new Error(`No stairs found on floor ${currentFloor}`);
+
+    // 2. Find matching stair on next floor (same name)
+    const stairEnd = poiItems.find(p =>
+      p.type === "Stairs" &&
+      p.name === stairStart.name &&
+      String(p.id).charAt(0) !== currentFloor // on another floor
+    );
+    if (!stairEnd) throw new Error(`No matching stair for ${stairStart.name}`);
+
+    // 3. Path from currentPoi → stairStart
+    const { node: sNode } = graph.nearestNodeToCoord(currentPoi.coord);
+    const { node: stairNode } = graph.nearestNodeToCoord(stairStart.coord);
+    const path = graph.dijkstra(sNode.id, stairNode.id);
+    segments.push({ floor: currentFloor, path: path.coords, endPoi: stairStart });
+
+    // 4. Update for next floor
+    currentPoi = stairEnd;
+    currentFloor = String(stairEnd.id).charAt(0);
+  }
+
+  // Final segment: stair on last floor → destination
+  const { node: sNode } = graph.nearestNodeToCoord(currentPoi.coord);
+  const { node: eNode } = graph.nearestNodeToCoord(endPoi.coord);
+  const path = graph.dijkstra(sNode.id, eNode.id);
+  segments.push({ floor: currentFloor, path: path.coords, endPoi: endPoi });
+
+  return segments;
+}
+
+
 
 
 // ----------------------------------------------------
@@ -363,68 +417,69 @@ let endPoiGlobal = null;
 document.getElementById("goBtn").addEventListener("click", async () => {
   const sPoi = poiItems.find(p => p.id == "201"); // always Wayfinding 1
   const ePoi = poiItems.find(p => p.id == endSel.value);
-endPoiGlobal = ePoi;
+  endPoiGlobal = ePoi;
   if (!sPoi) return setStatus("Start POI not found (Waypoint 1 missing)");
   if (!ePoi) return setStatus("Please select a destination");
 
-  const startFloor = String(sPoi.id).charAt(0);
-  const endFloor   = String(ePoi.id).charAt(0);
+  // reset state
+  segmentPaths = [];
+  currentSegment = 0;
 
-  // ✅ Same floor
-  if (startFloor === endFloor) {
-    const { node: sNode } = graph.nearestNodeToCoord(sPoi.coord);
-    const { node: eNode } = graph.nearestNodeToCoord(ePoi.coord);
-    if (!sNode || !eNode) return setStatus("No navigation nodes found");
+  // helper: get floor number from POI id
+  const getFloor = poi => String(poi.id).charAt(0);
 
-    const path = graph.dijkstra(sNode.id, eNode.id);
-    if (!path.coords.length) return setStatus("No path found");
+  let currentPoi = sPoi;
+  let currentFloor = getFloor(sPoi);
+  const targetFloor = getFloor(ePoi);
 
-    drawFullRoute(path.coords, ePoi, rooms);
-    return;
+  // build path segment by segment until destination floor is reached
+  while (currentFloor !== targetFloor) {
+    // 1. find nearest stair on this floor
+    const stairsOnFloor = poiItems.filter(p => p.type === "Stairs" && getFloor(p) === currentFloor);
+    if (!stairsOnFloor.length) return setStatus(`No stairs found on floor ${currentFloor}`);
+
+    const nearestStair = stairsOnFloor.reduce((best, stair) => {
+      const d = distMeters(currentPoi.coord, stair.coord);
+      return !best || d < best.dist ? { stair, dist: d } : best;
+    }, null).stair;
+
+    // 2. find matching stair on another floor (same name)
+    const stairEnd = poiItems.find(p => p.type === "Stairs" && p.name === nearestStair.name && getFloor(p) !== currentFloor);
+    if (!stairEnd) return setStatus(`No matching stair found for ${nearestStair.name}`);
+
+    // 3. path from currentPoi → nearest stair
+    const { node: sNode } = graph.nearestNodeToCoord(currentPoi.coord);
+    const { node: stairNode } = graph.nearestNodeToCoord(nearestStair.coord);
+    const path = graph.dijkstra(sNode.id, stairNode.id);
+
+    segmentPaths.push({ floor: currentFloor, path: path.coords, endPoi: nearestStair, stairExit: stairEnd });
+
+    // move to next floor
+    currentPoi = stairEnd;
+    currentFloor = getFloor(stairEnd);
   }
 
-  // 🔄 Cross-floor navigation
-  // 1. Nearest stair on start floor
-  const stairsStart = poiItems.filter(p => p.type === "Stairs" && String(p.id).startsWith(startFloor));
-  if (!stairsStart.length) return setStatus("No stairs found on start floor");
-
-  const nearestStartStair = stairsStart.reduce((best, stair) => {
-    const d = distMeters(sPoi.coord, stair.coord);
-    return !best || d < best.dist ? { stair, dist: d } : best;
-  }, null).stair;
-
-  // 2. Matching stair on target floor (same name)
-  const stairEnd = poiItems.find(p =>
-    p.type === "Stairs" &&
-    p.name === nearestStartStair.name &&
-    String(p.id).startsWith(endFloor)
-  );
-  if (!stairEnd) return setStatus("No matching stair on target floor");
-
-  // 3. Path start → stair (start floor)
-  const { node: sNode } = graph.nearestNodeToCoord(sPoi.coord);
-  const { node: stairStartNode } = graph.nearestNodeToCoord(nearestStartStair.coord);
-  const path1 = graph.dijkstra(sNode.id, stairStartNode.id);
-
-  // 4. Precompute path stair → destination (end floor)
-  await loadFloor(`LT${endFloor}`);
-  const { node: stairEndNode } = graph.nearestNodeToCoord(stairEnd.coord);
+  // final segment: from stair exit (or startPoi if same floor) → destination
+  const { node: sNode } = graph.nearestNodeToCoord(currentPoi.coord);
   const { node: eNode } = graph.nearestNodeToCoord(ePoi.coord);
-  const path2 = graph.dijkstra(stairEndNode.id, eNode.id);
+  const pathFinal = graph.dijkstra(sNode.id, eNode.id);
+  segmentPaths.push({ floor: currentFloor, path: pathFinal.coords, endPoi: ePoi });
 
-  // 5. Reset back to start floor
-  await loadFloor(`LT${startFloor}`);
+  // load first floor & draw first segment
+  const firstSeg = segmentPaths[0];
+  await loadFloor(`LT${firstSeg.floor}`);
+  document.getElementById("floorSelect").value = `LT${firstSeg.floor}`;
 
-  // 6. Store everything
-  segmentPaths = { floor1: path1.coords, floor2: path2.coords };
-  targetFloor = `LT${endFloor}`;
-  currentSegment = 1;
-  stairStartCoord = nearestStartStair.coord;
-  stairEndCoord = stairEnd.coord;
+  navPath = firstSeg.path;
+  navEndCoord = navPath[navPath.length - 1];
+  const out = buildCumDistances(navPath);
+  navCumDist = out.cum;
+  navTotalDist = out.total;
+  navDistPos = 0;
 
-  // Start with segment 1
-  drawFullRoute(path1.coords, nearestStartStair, rooms);
+  drawFullRoute(navPath, firstSeg.endPoi, rooms);
 });
+
 
 
 
@@ -587,7 +642,7 @@ map.addLayer({
       ["get", "name"]                           // fallback
     ],
     "text-offset": [0, 1.6],
-    "text-size": 12,
+    "text-size": 15,
     "text-anchor": "top"
   },
   paint: {
@@ -597,10 +652,10 @@ map.addLayer({
   }
 });
     map.addLayer({ id: "route-line", type: "line", source: "route",
-      paint: { "line-color": "#00d1b2", "line-width": 6 } });
+      paint: { "line-color": "#00d1b2", "line-width": 15 } });
     map.addLayer({ id: "nav-start", type: "symbol", source: "nav-markers",
       filter: ["==", ["get", "role"], "start"],
-      layout: { "icon-image": "start-icon", "icon-size": 0.08, "icon-anchor": "bottom",
+      layout: { "icon-image": "start-icon", "icon-size": 0.1, "icon-anchor": "bottom",
                 "icon-rotate": ["get", "bearing"], "icon-rotation-alignment": "map",
                 "icon-allow-overlap": true } });
     map.addLayer({ id: "nav-end", type: "circle", source: "nav-markers",
@@ -717,7 +772,7 @@ function animateMove(ts) {
   const ahead = coordAtDistance(navPath, navCumDist, navDistPos + 1).coord || pos;
   const bearing = turf.bearing(turf.point(pos), turf.point(ahead));
 
-  // Update markers
+  // update markers
   const feats = [
     { type: "Feature", properties: { role: "start", bearing }, geometry: { type: "Point", coordinates: pos } }
   ];
@@ -728,33 +783,45 @@ function animateMove(ts) {
 
   updateNavCamera(pos, ahead, bearing);
 
-  // 🔄 Switch floors when reaching stair on start floor
-if (currentSegment === 1 && stairStartCoord && distMeters(pos, stairStartCoord) < 0.5) {
-  console.log("Reached stairs → switching floor");
+  // 🔄 check if reached end of segment
+  if (moveDir === 1 && navDistPos >= navTotalDist - 0.1) {
+    if (currentSegment < segmentPaths.length - 1) {
+      // move to next segment
+      currentSegment++;
+      const seg = segmentPaths[currentSegment];
+      console.log(`Reached end of segment → switching to floor ${seg.floor}`);
 
-  loadFloor(targetFloor).then(() => {
-    currentSegment = 2;
-    navPath = segmentPaths.floor2;
-    navEndCoord = navPath[navPath.length - 1];
-
-    const out = buildCumDistances(navPath);
-    navCumDist = out.cum;
-    navTotalDist = out.total;
-    navDistPos = 0;
-
-    // 🟢 Redraw the route and markers after floor switch
-    
-    drawFullRoute(navPath, endPoiGlobal, rooms); 
-    updateNavMarkers(navPath[0], navEndCoord, navPath);
-  });
-}
-
-  if (moveDir === 1 && Math.abs(navTotalDist - navDistPos) < 0.01) {
-    isMoving = false;
-  } else {
-    requestAnimationFrame(animateMove);
+loadFloor(`LT${seg.floor}`).then(() => {
+  // prepend stair exit coord if not already close
+  let pathCoords = seg.path;
+  if (seg.stairExit && distMeters(seg.stairExit.coord, pathCoords[0]) > 0.5) {
+    pathCoords = [seg.stairExit.coord, ...pathCoords];
   }
+
+  navPath = pathCoords;
+  navEndCoord = navPath[navPath.length - 1];
+
+  const out = buildCumDistances(navPath);
+  navCumDist = out.cum;
+  navTotalDist = out.total;
+  navDistPos = 0;
+
+  drawFullRoute(navPath, seg.endPoi, rooms);
+  updateNavMarkers(navPath[0], navEndCoord, navPath);
+  document.getElementById("floorSelect").value = `LT${seg.floor}`;
+
+  requestAnimationFrame(animateMove);
+});
+      return; // stop here, wait for next animation frame after switch
+    } else {
+      // final destination reached
+      isMoving = false;
+    }
+  }
+
+  if (isMoving) requestAnimationFrame(animateMove);
 }
+
 
 
 
