@@ -200,6 +200,53 @@ function toExtrudable(fc, thicknessMeters) {
 
 
 
+async function loadSvgIcon(map, name, url) {
+  const response = await fetch(url);
+  const svgText = await response.text();
+
+  const img = new Image();
+  const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+  const urlBlob = URL.createObjectURL(svgBlob);
+
+  return new Promise((resolve, reject) => {
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const dataUrl = canvas.toDataURL("image/png");
+
+      map.loadImage(dataUrl, (err, image) => {
+        if (err) return reject(err);
+        if (!map.hasImage(name)) {
+          map.addImage(name, image);
+        }
+        resolve();
+      });
+      URL.revokeObjectURL(urlBlob);
+    };
+    img.onerror = reject;
+    img.src = urlBlob;
+  });
+}
+
+async function addSvgIconFromUrl(map, id, url, size = 32) {
+  const svgText = await fetch(url).then(r => r.text());
+  const blob = new Blob([svgText], { type: "image/svg+xml" });
+  const urlObj = URL.createObjectURL(blob);
+
+  return new Promise((resolve) => {
+    const img = new Image(size, size);
+    img.onload = () => {
+      if (!map.hasImage(id)) map.addImage(id, img);
+      URL.revokeObjectURL(urlObj);
+      resolve();
+    };
+    img.src = urlObj;
+  });
+}
+
 
 
 // ----------------------------------------------------
@@ -311,11 +358,12 @@ let targetFloor = null;
 let currentSegment = 1;
 let stairStartCoord = null;
 let stairEndCoord = null;
+let endPoiGlobal = null;
 
 document.getElementById("goBtn").addEventListener("click", async () => {
   const sPoi = poiItems.find(p => p.id == "201"); // always Wayfinding 1
   const ePoi = poiItems.find(p => p.id == endSel.value);
-
+endPoiGlobal = ePoi;
   if (!sPoi) return setStatus("Start POI not found (Waypoint 1 missing)");
   if (!ePoi) return setStatus("Please select a destination");
 
@@ -405,19 +453,28 @@ function drawFullRoute(coords, ePoi, rooms) {
   updateNavMarkers(navPath[0], navEndCoord, navPath);
   drawRoute({ coords });
 
-  // highlight if destination is Room
-  if (ePoi.type === "Room") {
-    const room = rooms.features.find(r => r.properties?.id === ePoi.id);
+  // ✅ highlight by id OR name (case-insensitive)
+  if (ePoi.type?.toLowerCase() === "room") {
+    const room = rooms.features.find(r =>
+      r.properties?.id === ePoi.id ||
+      (r.properties?.name?.toLowerCase() === ePoi.name.toLowerCase())
+    );
+
     if (room) {
       map.getSource("highlight-room")?.setData({
         type: "FeatureCollection",
         features: [room]
       });
+    } else {
+      console.warn("No matching room found for POI:", ePoi);
+      map.getSource("highlight-room")?.setData(emptyFC());
     }
   } else {
     map.getSource("highlight-room")?.setData(emptyFC());
   }
 }
+
+
 
 
   function drawRoute(res) {
@@ -460,6 +517,17 @@ function drawFullRoute(coords, ePoi, rooms) {
   // Sources & Layers
   // ----------------------------------------------------
 map.on("load", async () => {
+
+await addSvgIconFromUrl(map, "room-icon", "assets/door.svg");
+await addSvgIconFromUrl(map, "stairs-icon", "assets/stairs.svg");
+await addSvgIconFromUrl(map, "wayfinding-icon", "assets/man.svg");
+await map.loadImage("assets/arrow.png", (err, image) => {
+  if (err) throw err;
+  if (!map.hasImage("start-icon")) {
+    map.addImage("start-icon", image);
+  }
+});
+
     map.addSource("walkable", { type: "geojson", data: emptyFC() });
     map.addSource("walls-3d", { type: "geojson", data: emptyFC() });
     map.addSource("doors-3d", { type: "geojson", data: emptyFC() });
@@ -492,16 +560,47 @@ map.addLayer({
     "fill-extrusion-opacity": 0.9
   }
 });
-    map.addLayer({ id: "pois-symbol", type: "symbol", source: "pois",
-      layout: { "icon-image": ["get", "icon"], "icon-size": 1, "icon-anchor": "bottom",
-                "text-field": ["get", "name"], "text-offset": [0, 1], "text-size": 12, "text-anchor": "top",
-                "icon-allow-overlap": true, "text-allow-overlap": true },
-      paint: { "text-color": "#fff", "text-halo-color": "#000", "text-halo-width": 1 } });
+
+// map.addLayer({
+//   id: "pois-circle-border",
+//   type: "circle",
+//   source: "pois",
+//   paint: {
+//     "circle-radius": 14,            // larger than the icon
+//     "circle-color": "#fff",         // fill background
+//     "circle-stroke-color": "#000",  // border
+//     "circle-stroke-width": 2
+//   }
+// });
+map.addLayer({
+  id: "pois-symbol",
+  type: "symbol",
+  source: "pois",
+  layout: {
+    "icon-image": ["get", "icon"],
+    "icon-size": 1,
+    "icon-anchor": "center",
+    "text-field": [
+      "case",
+      ["==", ["get", "name"], "Wayfinding 1"],  // check name
+      "You are here",                           // replacement
+      ["get", "name"]                           // fallback
+    ],
+    "text-offset": [0, 1.6],
+    "text-size": 12,
+    "text-anchor": "top"
+  },
+  paint: {
+    "text-color": "#fff",
+    "text-halo-color": "#000",
+    "text-halo-width": 1
+  }
+});
     map.addLayer({ id: "route-line", type: "line", source: "route",
       paint: { "line-color": "#00d1b2", "line-width": 6 } });
     map.addLayer({ id: "nav-start", type: "symbol", source: "nav-markers",
       filter: ["==", ["get", "role"], "start"],
-      layout: { "icon-image": "start-icon", "icon-size": 0.25, "icon-anchor": "bottom",
+      layout: { "icon-image": "start-icon", "icon-size": 0.08, "icon-anchor": "bottom",
                 "icon-rotate": ["get", "bearing"], "icon-rotation-alignment": "map",
                 "icon-allow-overlap": true } });
     map.addLayer({ id: "nav-end", type: "circle", source: "nav-markers",
@@ -559,10 +658,13 @@ map.addLayer({
     navCumDist = [];
     navTotalDist = 0;
     navDistPos = 0;
-    map.getSource("route")?.setData(emptyFC());
-    map.getSource("nav-markers")?.setData(emptyFC());
-    map.getSource("highlight-room")?.setData(emptyFC());
-
+if (currentSegment === 1 || currentSegment === 2) {
+  // keep navigation state
+} else {
+  map.getSource("route")?.setData(emptyFC());
+  map.getSource("nav-markers")?.setData(emptyFC());
+  map.getSource("highlight-room")?.setData(emptyFC());
+}
     // Rebuild routing graph
     graph.nodes.clear();
     for (const feat of navlines.features) {
@@ -627,20 +729,25 @@ function animateMove(ts) {
   updateNavCamera(pos, ahead, bearing);
 
   // 🔄 Switch floors when reaching stair on start floor
-  if (currentSegment === 1 && stairStartCoord && distMeters(pos, stairStartCoord) < 0.5) {
-    console.log("Reached stairs → switching floor");
+if (currentSegment === 1 && stairStartCoord && distMeters(pos, stairStartCoord) < 0.5) {
+  console.log("Reached stairs → switching floor");
 
-    loadFloor(targetFloor).then(() => {
-      currentSegment = 2;
-      navPath = segmentPaths.floor2;
-      navEndCoord = navPath[navPath.length - 1];
+  loadFloor(targetFloor).then(() => {
+    currentSegment = 2;
+    navPath = segmentPaths.floor2;
+    navEndCoord = navPath[navPath.length - 1];
 
-      const out = buildCumDistances(navPath);
-      navCumDist = out.cum;
-      navTotalDist = out.total;
-      navDistPos = 0;
-    });
-  }
+    const out = buildCumDistances(navPath);
+    navCumDist = out.cum;
+    navTotalDist = out.total;
+    navDistPos = 0;
+
+    // 🟢 Redraw the route and markers after floor switch
+    
+    drawFullRoute(navPath, endPoiGlobal, rooms); 
+    updateNavMarkers(navPath[0], navEndCoord, navPath);
+  });
+}
 
   if (moveDir === 1 && Math.abs(navTotalDist - navDistPos) < 0.01) {
     isMoving = false;
