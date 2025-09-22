@@ -336,11 +336,14 @@ async function buildMultiFloorRoute(startPoi, endPoi, poiItems, graph) {
     style: `https://api.maptiler.com/maps/openstreetmap/style.json?key=${MAPTILER_KEY}`,
     center: [106.8272, -6.1754],
     zoom: 18,
-    pitch: 55,
-    bearing: -15,
+    pitch: 0,
+    bearing: 67,
     attributionControl: false,
-    minZoom: 0,
-    maxZoom: 24
+    minZoom: 20,
+    maxZoom: 24,
+      dragRotate: false,
+  pitchWithRotate: false,
+  touchPitch: false
   });
 
   window._map = map;
@@ -400,7 +403,7 @@ async function buildMultiFloorRoute(startPoi, endPoi, poiItems, graph) {
     }
   }
 
-  fillSelect(startSel, poiItems);
+  // fillSelect(startSel, poiItems);
   fillSelect(endSel, poiItems);
 
   // ----------------------------------------------------
@@ -464,7 +467,13 @@ document.getElementById("goBtn").addEventListener("click", async () => {
   const { node: eNode } = graph.nearestNodeToCoord(ePoi.coord);
   const pathFinal = graph.dijkstra(sNode.id, eNode.id);
   segmentPaths.push({ floor: currentFloor, path: pathFinal.coords, endPoi: ePoi });
-
+console.log("🛤️ Multi-floor route built:");
+segmentPaths.forEach((seg, i) => {
+  console.log(
+    ` Segment ${i + 1} → Floor: ${seg.floor}, End: ${seg.endPoi.name || seg.endPoi.id}`,
+    seg.path
+  );
+});
   // load first floor & draw first segment
   const firstSeg = segmentPaths[0];
   await loadFloor(`LT${firstSeg.floor}`);
@@ -874,11 +883,22 @@ loadFloor(`LT${seg.floor}`).then(() => {
     map.easeTo({
       center: pos,
       zoom: camZoomSmoothed,
-      bearing,
-      pitch: map.getPitch(),
+      // bearing: 67,
+      pitch: 0,
       duration: CAM.easeMs
     });
   }
+
+  //Done Functions
+  function showDoneModal() {
+  document.getElementById("doneModal").classList.remove("hidden");
+}
+function hideDoneModal() {
+  document.getElementById("doneModal").classList.add("hidden");
+}
+
+document.getElementById("doneOk").addEventListener("click", hideDoneModal);
+
 
   // ----------------------------------------------------
   // Fit function
