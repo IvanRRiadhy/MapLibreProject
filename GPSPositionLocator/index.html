@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GPS Locator - Pro</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>GPS Locator</h1>
+            <p class="subtitle">Real-time coordinate tracking</p>
+        </header>
+
+        <main class="grid">
+            <div class="card" id="card-x">
+                <label>X Coordinate</label>
+                <div class="value-container">
+                    <span id="lon-value" class="value">---.----</span>
+                </div>
+                <div class="label-sub">Longitude</div>
+            </div>
+
+            <div class="card" id="card-y">
+                <label>Y Coordinate</label>
+                <div class="value-container">
+                    <span id="lat-value" class="value">---.----</span>
+                </div>
+                <div class="label-sub">Latitude</div>
+            </div>
+        </main>
+
+        <section class="status-panel">
+            <div class="status-item">
+                <span class="status-label">Accuracy:</span>
+                <span id="accuracy-value" class="status-value">-- m</span>
+            </div>
+            <div class="status-item compass-item">
+                <div id="compass-arrow" class="compass-arrow">↑</div>
+                <div id="direction-text" class="direction-text">---</div>
+                <span id="heading-value" class="status-value">--°</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Status:</span>
+                <span id="status-text" class="status-value status-waiting">Waiting for permission...</span>
+            </div>
+        </section>
+
+        <footer>
+            <button id="toggle-btn" class="btn-primary">Start Tracking</button>
+            <button id="save-btn" class="btn-secondary" style="margin-top: 10px; display: none;">Save Position</button>
+        </footer>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

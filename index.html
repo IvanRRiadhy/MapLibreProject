@@ -163,12 +163,6 @@
   <!-- Floating panel -->
   <div class="topbar">
     <div class="controls">  
-      <label for="floorSelect">Floor</label>
-      <select id="floorSelect">
-        <option value="LT1">Lantai 1</option>
-        <option value="LT2" selected>Lantai 2</option>
-      </select>
-
       <label for="startPoi">Start</label>
      <div id="startPoi" class="static-start">
   Lantai 2 Gedung Instalasi Rawat Jalan
@@ -195,6 +189,11 @@
       <span class="key"><span class="swatch" style="background:#000;"></span>POIs</span>
       <span class="key"><span class="swatch" style="background:#ffff00;"></span>Destination</span>
       <span class="key"><span class="swatch line" style="background:#00d1b2;"></span>Shortest Path</span>
+    </div>
+    <div id="debugCoords" style="margin-top:10px; font-family:monospace; font-size:12px; background:#1a1a1a99; padding:8px; border-radius:8px; border:1px solid #333; color:#58a6ff; display:none; line-height:1.5;">
+      <b>Marker GPS:</b><br>
+      Lon: <span id="debugLon">---</span><br>
+      Lat: <span id="debugLat">---</span>
     </div>
   </div>
 

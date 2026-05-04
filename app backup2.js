@@ -14,15 +14,37 @@ const START_ICON_DATAURI =
   <path d="M256 0L480 512 256 384 32 512 256 0z" fill="#007bff"/>
 </svg>`);
 
+const FLOORS = {
+  LT1: {
+    walls: "geojson/RSUP-LT1-Walls.geojson",
+    walkable: "geojson/RSUP-LT1-Walkable.geojson",
+    doors: "geojson/RSUP-LT1-Doors.geojson",
+    rooms: "geojson/RSUP-LT1-Rooms.geojson",
+    pois: "geojson/RSUP-POIs.geojson", // combined POIs
+    navlines: "geojson/RSUP-NavLines.geojson",
+    navpoints: "geojson/RSUP-NavPoints.geojson"
+  },
+  LT2: {
+    walls: "geojson/RSUP-Walls.geojson",
+    walkable: "geojson/RSUP-Walkable.geojson",
+    doors: "geojson/RSUP-Doors.geojson",
+    rooms: "geojson/RSUP-Rooms.geojson",
+    pois: "geojson/RSUP-POIs.geojson",
+    navlines: "geojson/RSUP-NavLines.geojson",
+    navpoints: "geojson/RSUP-NavPoints.geojson"
+  }
+};
+
+let currentFloor = "LT2";
+
 const FILES = {
-  walls: "geojson/NewLantai2/NewLantai2Wall.geojson",
-  walkable: "geojson/NewLantai2/NewLantai2Walkable.geojson",
-  doors: "geojson/NewLantai2/NewLantai2Door.geojson",
-  pois: "geojson/NewLantai2/NewLantai2PoI.geojson",
-  navlines: null,
-  rooms: "geojson/NewLantai2/NewLantai2Room.geojson",
-  navpoints: null,
-  fetchedNodes: "geojson/fetched-node.geojson"
+  walls: "geojson/RSUP-Walls.geojson",
+  walkable: "geojson/RSUP-Walkable.geojson",
+  doors: "geojson/RSUP-Doors.geojson",
+  pois: "geojson/RSUP-POIs.geojson",   // includes rooms + stairs
+  navlines: "geojson/RSUP-NavLines.geojson",
+  rooms: "geojson/RSUP-Rooms.geojson",
+  navpoints: "geojson/RSUP-NavPoints.geojson"
 };
 
 // Navigation state
@@ -37,8 +59,6 @@ let keyBack = false;
 let moveDir = 0;
 let isMoving = false;
 let lastTs = 0;
-let roomsData = emptyFC(); // Global store for highlighting
-
 
 // Camera settings
 const CAM = {
@@ -62,47 +82,9 @@ const SPEED_PX_PER_SEC = 160;
 
 function lonLatToMeters([lon, lat]) {
   const x = lon * 20037508.34 / 180;
-  let y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
-  y = y * 20037508.34 / 180;
-  return [x, y];
+  const y = Math.log(Math.tan((90 + lat) * Math.PI / 360)) / (Math.PI / 180);
+  return [x, y * 20037508.34 / 180];
 }
-
-/**
- * Procedurally generates a grid of navigation points inside the walkable area.
- */
-function generateNavGrid(walkableFC, spacingMeters = 0.5) {
-  if (!walkableFC || !walkableFC.features.length) return emptyFC();
-  
-  const bbox = turf.bbox(walkableFC);
-  const grid = [];
-  
-  // Approx conversion for grid steps
-  const latStep = spacingMeters / 111320;
-  const lonStep = spacingMeters / (111320 * Math.cos(bbox[1] * Math.PI / 180));
-
-  for (let lon = bbox[0]; lon <= bbox[2]; lon += lonStep) {
-    for (let lat = bbox[1]; lat <= bbox[3]; lat += latStep) {
-      const pt = [lon, lat];
-      
-      // Strict check: point must be inside a walkable polygon
-      let isInside = false;
-      for (const feat of walkableFC.features) {
-        if (turf.booleanPointInPolygon(pt, feat)) {
-          isInside = true;
-          break;
-        }
-      }
-      
-      if (isInside) {
-        grid.push(turf.point(pt, { id: `grid-${grid.length}` }));
-      }
-    }
-  }
-  
-  console.log(`🏗️ Procedural Grid: Generated ${grid.length} nodes at ${spacingMeters}m spacing.`);
-  return turf.featureCollection(grid);
-}
-
 function distMeters(a, b) {
   const [ax, ay] = lonLatToMeters(a);
   const [bx, by] = lonLatToMeters(b);
@@ -188,52 +170,59 @@ class Graph {
  * Automatically connects NavPoints that have a direct line-of-sight 
  * (not intersected by walls).
  */
-function buildVisibilityGraph(graph, navPoints, walls) {
-  const nodes = navPoints.features;
-  const wallLines = [];
+function buildVisibilityGraph(graph, navPoints, walls, maxDist = 30) {
+  graph.nodes.clear();
+  const features = navPoints.features || [];
+  const coords = features.map(f => f.geometry.coordinates);
+
+  // 1. Ensure all nodes are added
+  coords.forEach(p => graph.ensureNode(p));
+
+  // 2. Check every pair for Line-of-Sight
   let edgesCount = 0;
-  
-  // Convert walls to line segments for faster intersection checks
-  walls.features.forEach(f => {
-    const coords = turf.getCoords(f);
-    if (f.geometry.type === "Polygon") {
-      coords.forEach(ring => {
-        for (let i = 0; i < ring.length - 1; i++) {
-          wallLines.push(turf.lineString([ring[i], ring[i + 1]]));
-        }
-      });
-    } else if (f.geometry.type === "MultiPolygon") {
-       coords.forEach(poly => poly.forEach(ring => {
-         for (let i = 0; i < ring.length - 1; i++) {
-           wallLines.push(turf.lineString([ring[i], ring[i + 1]]));
-         }
-       }));
-    }
-  });
+  for (let i = 0; i < coords.length; i++) {
+    for (let j = i + 1; j < coords.length; j++) {
+      const p1 = coords[i];
+      const p2 = coords[j];
 
-  console.log(`🔗 Connecting 0.5m grid...`);
-  
-  // Optimization: For a 0.5m grid, only connect neighbors within ~0.8m
-  // This creates an 8-way grid connectivity (ortho + diagonal)
-  const MAX_CONN_DIST = 0.8; 
-
-  for (let i = 0; i < nodes.length; i++) {
-    const p1 = nodes[i].geometry.coordinates;
-    for (let j = i + 1; j < nodes.length; j++) {
-      const p2 = nodes[j].geometry.coordinates;
-      
-      const d = distMeters(p1, p2);
-      if (d > MAX_CONN_DIST) continue;
+      // Optional: limit distance to keep graph clean
+      if (distMeters(p1, p2) > maxDist) continue;
 
       const line = turf.lineString([p1, p2]);
       let blocked = false;
-      for (const wall of wallLines) {
+
+      for (const wall of walls.features) {
+        // Check if line crosses any wall boundary
         if (turf.lineIntersect(line, wall).features.length > 0) {
           blocked = true;
           break;
         }
+        // Check if the segment is entirely inside a wall polygon
+        const mid = turf.midpoint(turf.point(p1), turf.point(p2));
+        if (turf.booleanPointInPolygon(mid, wall)) {
+          blocked = true;
+          break;
+        }
       }
-      
+
+      if (!blocked) {
+        // Ensure we don't skip over any intermediate NavPoints
+        for (let k = 0; k < coords.length; k++) {
+          if (k === i || k === j) continue;
+          const p3 = coords[k];
+const distToLine = turf.pointToLineDistance(turf.point(p3), line, { units: 'meters' });
+if (distToLine < 0.5) {
+  // Only block if P3 is NOT one of the endpoints (with a small buffer)
+  const d13 = distMeters(p1, p3);
+  const d23 = distMeters(p2, p3);
+  if (d13 > 0.6 && d23 > 0.6) {
+    blocked = true;
+    break;
+  }
+}
+        }
+      }
+
       if (!blocked) {
         graph.addEdge(p1, p2);
         edgesCount++;
@@ -384,21 +373,48 @@ async function buildMultiFloorRoute(startPoi, endPoi, poiItems, graph) {
 
 
 
+// ----------------------------------------------------
+// MAIN
+// ----------------------------------------------------
 (async function main() {
+  const load = f => fetch(f).then(r => r.json());
+
+  const [walls, walkable, doors, pois, navlines, rooms, navpoints] =
+    await Promise.all([
+      load(FILES.walls),
+      load(FILES.walkable),
+      load(FILES.doors),
+      load(FILES.pois),
+      load(FILES.navlines),
+      load(FILES.rooms),
+      load(FILES.navpoints)
+    ]);
+
+  // Convert to extrudable 3D
+  const walls3d = toExtrudable(walls, WALL_THICKNESS_M);
+  walls3d.features.forEach(f => {
+    f.properties = { ...(f.properties || {}), height: 1 };
+  });
+
+  const doors3d = toExtrudable(doors, DOOR_THICKNESS_M);
+  doors3d.features.forEach(f => {
+    f.properties = { ...(f.properties || {}), height: 0 };
+  });
+
   // Map
   const map = new maplibregl.Map({
     container: "map",
     style: `https://api.maptiler.com/maps/openstreetmap/style.json?key=${MAPTILER_KEY}`,
     center: [106.8272, -6.1754],
     zoom: 18,
-    pitch: 55,
-    bearing: -15,
+    pitch: 0,
+    bearing: 67,
     attributionControl: false,
-    minZoom: 17,
+    minZoom: 20,
     maxZoom: 24,
-    dragRotate: true,
-    pitchWithRotate: true,
-    touchPitch: true
+      dragRotate: false,
+  pitchWithRotate: false,
+  touchPitch: false
   });
 
   window._map = map;
@@ -407,13 +423,41 @@ async function buildMultiFloorRoute(startPoi, endPoi, poiItems, graph) {
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(new maplibregl.AttributionControl({ compact: true }));
 
-  // Build routing graph (filled in loadMainData)
+  // Build routing graph
   const graph = new Graph();
+  for (const feat of navlines.features) {
+    if (!feat.geometry) continue;
+    const g = feat.geometry;
 
-  // UI placeholders (filled after load)
+    if (g.type === "LineString") {
+      const coords = g.coordinates;
+      for (let i = 1; i < coords.length; i++) {
+        graph.addEdge(coords[i - 1], coords[i]);
+      }
+    }
+
+    if (g.type === "MultiLineString") {
+      for (const line of g.coordinates) {
+        for (let i = 1; i < line.length; i++) {
+          graph.addEdge(line[i - 1], line[i]);
+        }
+      }
+    }
+  }
+
+  // POIs
+  const poiItems = pois.features
+    .filter(f => f.geometry?.type === "Point")
+    .map((f, i) => ({
+      id: f.properties?.id ?? `POI-${i + 1}`,
+      name: f.properties?.name ?? `POI-${i + 1}`,
+      type: f.properties?.type ?? "poi",
+      coord: f.geometry.coordinates
+    }));
+
+  // UI dropdowns
   const startSel = document.getElementById("startPoi");
   const endSel = document.getElementById("endPoi");
-  let poiItems = [];
 
   function fillSelect(el, items) {
     el.innerHTML = "";
@@ -445,9 +489,8 @@ let stairEndCoord = null;
 let endPoiGlobal = null;
 
 document.getElementById("goBtn").addEventListener("click", async () => {
-  const sPoi = poiItems.find(p => p.id == "113"); // always Wayfinding 1
+  const sPoi = poiItems.find(p => p.id == "201"); // always Wayfinding 1
   const ePoi = poiItems.find(p => p.id == endSel.value);
-  console.log("sPoi: ", sPoi, poiItems)
   endPoiGlobal = ePoi;
   if (!sPoi) return setStatus("Start POI not found (Waypoint 1 missing)");
   if (!ePoi) return setStatus("Please select a destination");
@@ -509,8 +552,10 @@ segmentPaths.forEach((seg, i) => {
     seg.path
   );
 });
-  // Load first (and only) segment
+  // load first floor & draw first segment
   const firstSeg = segmentPaths[0];
+  await loadFloor(`LT${firstSeg.floor}`);
+  document.getElementById("floorSelect").value = `LT${firstSeg.floor}`;
 
   navPath = firstSeg.path;
   navEndCoord = navPath[navPath.length - 1];
@@ -519,7 +564,7 @@ segmentPaths.forEach((seg, i) => {
   navTotalDist = out.total;
   navDistPos = 0;
 
-  drawFullRoute(navPath, firstSeg.endPoi, roomsData);
+  drawFullRoute(navPath, firstSeg.endPoi, rooms);
 });
 
 
@@ -634,7 +679,6 @@ await map.loadImage("assets/arrow.png", (err, image) => {
     map.addSource("nav-markers", { type: "geojson", data: emptyFC() });
     map.addSource("highlight-room", { type: "geojson", data: emptyFC() });
     map.addSource("nav-points", { type: "geojson", data: emptyFC() });
-    map.addSource("fetched-nodes", { type: "geojson", data: emptyFC() });
 
     map.addLayer({ id: "walkable-fill", type: "fill", source: "walkable",
       paint: { "fill-color": "#29a329", "fill-opacity": 0.15 } });
@@ -706,19 +750,6 @@ map.addLayer({
       filter: ["==", ["get", "role"], "end"],
       paint: { "circle-radius": 8, "circle-color": "#ff6b6b",
                "circle-stroke-color": "#7a1f1f", "circle-stroke-width": 2 } });
-
-    map.addLayer({
-      id: "fetched-nodes-layer",
-      type: "circle",
-      source: "fetched-nodes",
-      paint: {
-        "circle-radius": 6,
-        "circle-color": "#58a6ff",
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": 2,
-        "circle-opacity": 0.9
-      }
-    });
     map.addLayer({ id: "highlight-room-fill", type: "fill", source: "highlight-room",
       paint: { "fill-color": "#ffff00", "fill-opacity": 0.35 } });
     map.addLayer({ id: "highlight-room-outline", type: "line", source: "highlight-room",
@@ -737,28 +768,28 @@ map.addLayer({
       }
     });
 
-    // Load floor data
-    await loadMainData();
+    // Load default floor
+    await loadFloor("LT2");
+  });
+
+  // Floor switcher
+  document.getElementById("floorSelect").addEventListener("change", (e) => {
+    loadFloor(e.target.value);
+    
   });
 
   // Load floor data
-  async function loadMainData() {
-    const f = FILES;
-    const [walls, walkable, doors, rooms, pois, navlines, navpoints, fetchedNodes] = await Promise.all([
-      f.walls ? fetch(f.walls).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC()),
-      f.walkable ? fetch(f.walkable).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC()),
-      f.doors ? fetch(f.doors).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC()),
-      f.rooms ? fetch(f.rooms).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC()),
-      f.pois ? fetch(f.pois).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC()),
-      f.navlines ? fetch(f.navlines).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC()),
-      f.navpoints ? fetch(f.navpoints).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC()),
-      f.fetchedNodes ? fetch(f.fetchedNodes).then(r => r.json()).catch(() => emptyFC()) : Promise.resolve(emptyFC())
+  async function loadFloor(floorKey) {
+    const f = FLOORS[floorKey]; currentFloor = floorKey;
+    const [walls, walkable, doors, rooms, pois, navlines, navpoints] = await Promise.all([
+      fetch(f.walls).then(r => r.json()),
+      fetch(f.walkable).then(r => r.json()),
+      fetch(f.doors).then(r => r.json()),
+      fetch(f.rooms).then(r => r.json()),
+      fetch(f.pois).then(r => r.json()),
+      f.navlines ? fetch(f.navlines).then(r => r.json()) : Promise.resolve(emptyFC()),
+      f.navpoints ? fetch(f.navpoints).then(r => r.json()) : Promise.resolve(emptyFC())
     ]);
-
-    roomsData = rooms; // Store for highlighting
-
-    // PROCEDURAL UPDATE: Generate the navigation grid from the walkable area
-    const generatedNavPoints = generateNavGrid(walkable, 0.5);
 
     const walls3d = toExtrudable(walls, WALL_THICKNESS_M);
       walls3d.features.forEach(f => {
@@ -769,26 +800,16 @@ map.addLayer({
     f.properties = { ...(f.properties || {}), height: 0 };
   });
 
+    // Filter POIs for current floor
+    const filteredPois = filterPoisByFloor(pois, floorKey);
+    const filteredNavPoints = filterPoisByFloor(navpoints, floorKey);
+
     map.getSource("walls-3d").setData(walls3d);
     map.getSource("doors-3d").setData(doors3d);
     map.getSource("walkable").setData(walkable);
     map.getSource("rooms").setData(rooms);
-    map.getSource("pois").setData(pois);
-    map.getSource("nav-points").setData(generatedNavPoints);
-    map.getSource("fetched-nodes").setData(fetchedNodes);
-
-    // POIs
-    poiItems = pois.features
-      .filter(f => f.geometry?.type === "Point")
-      .map((f, i) => ({
-        id: f.properties?.id ?? `POI-${i + 1}`,
-        name: f.properties?.name ?? `POI-${i + 1}`,
-        type: f.properties?.type ?? "poi",
-        coord: f.geometry.coordinates
-      }));
-    
-    fillSelect(startSel, poiItems);
-    fillSelect(endSel, poiItems);
+    map.getSource("pois").setData(filteredPois);
+    map.getSource("nav-points").setData(filteredNavPoints);
 
     // Reset navigation state
     navPath = [];
@@ -806,8 +827,8 @@ if (currentSegment === 1 || currentSegment === 2) {
     // Rebuild routing graph
     graph.nodes.clear();
 
-    if (USE_AUTO_NAV && generatedNavPoints.features.length > 0) {
-      buildVisibilityGraph(graph, generatedNavPoints, walls);
+    if (USE_AUTO_NAV && navpoints.features.length > 0) {
+      buildVisibilityGraph(graph, filteredNavPoints, walls);
     } else {
       for (const feat of navlines.features) {
         if (!feat.geometry) continue;
@@ -827,19 +848,7 @@ if (currentSegment === 1 || currentSegment === 2) {
     }
 
     fitTo(walkable);
-
-    // --- LIVE POLLING FOR NEW NODES ---
-    setInterval(async () => {
-      try {
-        const resp = await fetch(FILES.fetchedNodes + '?t=' + Date.now());
-        if (resp.ok) {
-          const data = await resp.json();
-          map.getSource("fetched-nodes")?.setData(data);
-        }
-      } catch (e) {
-        console.warn("Live update failed for fetched nodes", e);
-      }
-    }, 3000);
+    console.log(`✅ Switched to floor ${floorKey}`);
   }
 
   // ----------------------------------------------------

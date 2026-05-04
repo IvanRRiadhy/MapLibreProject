@@ -1,0 +1,117 @@
+{
+  "type": "FeatureCollection",
+  "name": "Fetched Node",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1777887841355,
+        "timestamp": "04/05/2026, 16.44.01",
+        "type": "fetched"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.8191532,
+          -6.1447896
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1777887854526,
+        "timestamp": "04/05/2026, 16.44.14",
+        "type": "fetched"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.819152,
+          -6.1447901
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1777887862021,
+        "timestamp": "04/05/2026, 16.44.22",
+        "type": "fetched"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.8191519,
+          -6.1447877
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1777888122204,
+        "timestamp": "04/05/2026, 16.48.42",
+        "type": "fetched"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.819038,
+          -6.1448993
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1777888194274,
+        "timestamp": "04/05/2026, 16.49.54",
+        "type": "fetched"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.8190847,
+          -6.1447706
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1777888209302,
+        "timestamp": "04/05/2026, 16.50.09",
+        "type": "fetched"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.8190752,
+          -6.1447569
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1777888575581,
+        "timestamp": "04/05/2026, 16.56.15",
+        "type": "fetched"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          106.8190391,
+          -6.1447752
+        ]
+      }
+    }
+  ]
+}

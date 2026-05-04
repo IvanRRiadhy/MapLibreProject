@@ -19,7 +19,6 @@ const START_ICON_DATAURI =
 </svg>`);
 const WALL_THICKNESS_M = 0.4;
 const WALL_HEIGHT_M = 0.5;
-const USE_AUTO_NAV = true; // Auto-connect NavPoints avoiding walls
 
 const DOOR_THICKNESS_M = 0.2;
 const DOOR_HEIGHT_M = 0;
@@ -30,8 +29,7 @@ const FILES = {
   portals: "geojson/floor1-portal.geojson",
   pois: "geojson/floor1-poi.geojson",
   navlines: "geojson/floor1-navigationlines2.geojson",
-  navpoints: "geojson/floor1-navigationpoints.geojson",
-  fetchedNodes: "geojson/fetched-node.geojson"
+  navpoints: "geojson/floor1-navigationpoints.geojson" // optional, used if present
 };
 let navPath = [];        // full array of coordinates [lon,lat]
 let navIndex = 0;        // current index along the path
@@ -176,68 +174,6 @@ class Graph {
     return { coords, length };
   }
 }
-
-/**
- * Automatically connects NavPoints that have a direct line-of-sight 
- * (not intersected by walls).
- */
-function buildVisibilityGraph(graph, navPoints, walls, maxDist = 30) {
-  graph.nodes.clear();
-  const features = navPoints.features || [];
-  const coords = features.map(f => f.geometry.coordinates);
-
-  // 1. Ensure all nodes are added
-  coords.forEach(p => graph.ensureNode(p));
-
-  // 2. Check every pair for Line-of-Sight
-  let edgesCount = 0;
-  for (let i = 0; i < coords.length; i++) {
-    for (let j = i + 1; j < coords.length; j++) {
-      const p1 = coords[i];
-      const p2 = coords[j];
-
-      if (distMeters(p1, p2) > maxDist) continue;
-
-      const line = turf.lineString([p1, p2]);
-      let blocked = false;
-
-      for (const wall of walls.features) {
-        if (turf.lineIntersect(line, wall).features.length > 0) {
-          blocked = true;
-          break;
-        }
-        const mid = turf.midpoint(turf.point(p1), turf.point(p2));
-        if (turf.booleanPointInPolygon(mid, wall)) {
-          blocked = true;
-          break;
-        }
-      }
-
-      if (!blocked) {
-        // Intermediate node check
-        for (let k = 0; k < coords.length; k++) {
-          if (k === i || k === j) continue;
-          const p3 = coords[k];
-          const distToLine = turf.pointToLineDistance(turf.point(p3), line, { units: 'meters' });
-          if (distToLine < 0.5) {
-            const d13 = distMeters(p1, p3);
-            const d23 = distMeters(p2, p3);
-            if (d13 > 0.6 && d23 > 0.6) {
-              blocked = true;
-              break;
-            }
-          }
-        }
-      }
-
-      if (!blocked) {
-        graph.addEdge(p1, p2);
-        edgesCount++;
-      }
-    }
-  }
-  console.log(`📡 Visibility Graph: ${graph.nodes.size} nodes, ${edgesCount} auto-connections.`);
-}
 function emptyFC() {
   return { type: 'FeatureCollection', features: [] };
 }
@@ -344,7 +280,7 @@ function updateNavCamera(pos, ahead, headingDeg) {
   // Load data
   const load = (f) => fetch(f).then(r => r.json());
   const [
-    walls, walkable, doors, portals, pois, navlines, navpointsMaybe, fetchedNodes
+    walls, walkable, doors, portals, pois, navlines, navpointsMaybe
   ] = await Promise.all([
     load(FILES.walls),
     load(FILES.walkable),
@@ -352,8 +288,7 @@ function updateNavCamera(pos, ahead, headingDeg) {
     load(FILES.portals),
     load(FILES.pois),
     load(FILES.navlines),
-    load(FILES.navpoints).catch(() => null),
-    load(FILES.fetchedNodes).catch(() => ({ type: "FeatureCollection", features: [] }))
+    load(FILES.navpoints).catch(() => null)
   ]);
 // Build extrudable polygons from a FeatureCollection that may mix
 // LineString/MultiLineString and Polygon/MultiPolygon.
@@ -461,18 +396,13 @@ function orientCameraForRoute(start, end) {
 
 
 
-  // Build routing graph
+  // Build routing graph from navlines (strictly follow given segments)
   const graph = new Graph();
-
-  if (USE_AUTO_NAV && navpointsMaybe && navpointsMaybe.features.length > 0) {
-    buildVisibilityGraph(graph, navpointsMaybe, walls);
-  } else {
-    for (const feat of navlines.features) {
-      if (!feat.geometry || feat.geometry.type !== "LineString") continue;
-      const coords = feat.geometry.coordinates;
-      for (let i = 1; i < coords.length; i++) {
-        graph.addEdge(coords[i-1], coords[i]);
-      }
+  for (const feat of navlines.features) {
+    if (!feat.geometry || feat.geometry.type !== "LineString") continue;
+    const coords = feat.geometry.coordinates;
+    for (let i = 1; i < coords.length; i++) {
+      graph.addEdge(coords[i-1], coords[i]);
     }
   }
 
@@ -548,11 +478,6 @@ function orientCameraForRoute(start, end) {
     }
 
     const path = graph.dijkstra(sNode.id, eNode.id);
-    if (path.coords.length > 0) {
-      // Connect actual start and end coordinates to the path
-      path.coords = [sPoi.coord, ...path.coords, ePoi.coord];
-      path.length = path.coords.reduce((acc, c, i) => i ? acc + distMeters(path.coords[i-1], c) : 0, 0);
-    }
     // updateNavMarkers(sPoi.coord, ePoi.coord, path.coords);
 //     if (path.coords.length) {
 //   updateStartMarker(path.coords[0], path.coords);
@@ -607,14 +532,6 @@ const ahead0 = coordAtDistance(
 
 // snap the camera to marker heading
 updateNavCamera(pos0, ahead0, heading0);
-
-// Update debug coords
-const debugPanel = document.getElementById("debugCoords");
-if (debugPanel) {
-  debugPanel.style.display = "block";
-  document.getElementById("debugLon").textContent = pos0[0].toFixed(8);
-  document.getElementById("debugLat").textContent = pos0[1].toFixed(8);
-}
 }
   });
 
@@ -629,9 +546,6 @@ clearBtn.addEventListener("click", () => {
 
   stopGpsFollow();
   clearGpsPoint();
-
-  const debugPanel = document.getElementById("debugCoords");
-  if (debugPanel) debugPanel.style.display = "none";
 });
 
 
@@ -770,20 +684,6 @@ map.addLayer({
       paint: { "text-color": "#ffffff", "text-halo-color": "#000", "text-halo-width": 1 }
     });
 
-    map.addSource("nav-points", { type: "geojson", data: navpointsMaybe || emptyFC() });
-    map.addLayer({
-      id: "nav-points-layer",
-      type: "circle",
-      source: "nav-points",
-      paint: {
-        "circle-radius": 4,
-        "circle-color": "#ffffff",
-        "circle-stroke-color": "#000000",
-        "circle-stroke-width": 1,
-        "circle-opacity": 0.8
-      }
-    });
-
     map.addLayer({
       id: "navlines-line",
       type: "line",
@@ -797,34 +697,6 @@ map.addLayer({
       source: "route",
       paint: { "line-color": "#00d1b2", "line-width": 6 }
     });
-
-    map.addSource("fetched-nodes", { type: "geojson", data: fetchedNodes || emptyFC() });
-    map.addLayer({
-      id: "fetched-nodes-layer",
-      type: "circle",
-      source: "fetched-nodes",
-      paint: {
-        "circle-radius": 6,
-        "circle-color": "#58a6ff",
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": 2,
-        "circle-opacity": 0.9
-      }
-    });
-
-    // --- LIVE POLLING FOR NEW NODES ---
-    setInterval(async () => {
-      try {
-        const resp = await fetch(FILES.fetchedNodes + '?t=' + Date.now()); // cache-busting
-        if (resp.ok) {
-          const data = await resp.json();
-          const src = map.getSource("fetched-nodes");
-          if (src) src.setData(data);
-        }
-      } catch (e) {
-        console.warn("Live update failed for fetched nodes", e);
-      }
-    }, 3000); // Check every 3 seconds
 
     fitTo(walkable ?? walls ?? navlines);
 
@@ -1003,14 +875,6 @@ function animateMove(ts) {
   }
   map.getSource('nav-markers')?.setData({ type: 'FeatureCollection', features });
 updateNavCamera(pos, ahead, bearing);
-
-  // Update debug coords
-  const debugPanel = document.getElementById("debugCoords");
-  if (debugPanel) {
-    debugPanel.style.display = "block";
-    document.getElementById("debugLon").textContent = pos[0].toFixed(8);
-    document.getElementById("debugLat").textContent = pos[1].toFixed(8);
-  }
   // done?
   if (moveDir === 1 && Math.abs(navTotalDist - navDistPos) < 0.01) {
     isMoving = false;
